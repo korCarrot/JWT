@@ -2,6 +2,7 @@ package com.boot.jwt.config;
 
 import com.boot.jwt.security.APIUserDetailService;
 import com.boot.jwt.security.filter.APILoginFilter;
+import com.boot.jwt.security.filter.RefreshTokenFilter;
 import com.boot.jwt.security.filter.TokenCheckFilter;
 import com.boot.jwt.security.handler.APILoginSuccessHandler;
 import com.boot.jwt.util.JWTUtil;
@@ -21,6 +22,11 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.Arrays;
 
 @Log4j2
 @Configuration
@@ -94,8 +100,11 @@ public class CustomSecurityConfig {
 
         //api로 시작하는 모든 경로는 TokenCheckFilter 동작
         http.addFilterBefore(
-                tokenCheckFilter(jwtUtil), UsernamePasswordAuthenticationFilter.class
+                tokenCheckFilter(jwtUtil, apiUserDetailService), UsernamePasswordAuthenticationFilter.class
         );
+
+        //refreshToken 호출 처리 - 다른 JWT 관련 필터들의 동작 이전으로 배치
+        http.addFilterBefore(new RefreshTokenFilter("/refreshToken", jwtUtil), TokenCheckFilter.class);
 
         //CSRF 토큰 비활성화
         http.csrf().disable();  // 1. CSRF토큰 비활성화
@@ -104,11 +113,28 @@ public class CustomSecurityConfig {
         //sessionCreationPolicy() : 세션 생성 정책을 설정. SessionCreationPolicy 열거형(Enum)을 인수로 받아, 스프링 시큐리티가 세션을 어떻게 생성하고 관리할지를 정의
         http.sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS);    // 2. 세션을 사용하지 않음
 
+        //CORS 관련 설정
+        http.cors(httpSecurityCorsConfigurer -> {
+            httpSecurityCorsConfigurer.configurationSource(corsConfigurationSource());
+        });
+
         return http.build();
     }
 
-    private TokenCheckFilter tokenCheckFilter(JWTUtil jwtUtil){
-        return new TokenCheckFilter(jwtUtil);
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOriginPatterns(Arrays.asList("*")); //허용된 출처 패턴을 설정
+        configuration.setAllowedMethods(Arrays.asList("HEAD", "GET", "POST", "PUT", "DELETE")); //허용된 HTTP 메서드를 설정
+        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Cache-Control", "Content-Type"));   //허용된 HTTP 헤더를 설정
+        configuration.setAllowCredentials(true);    //요청이 인증 정보를 포함할 수 있는지 여부를 설정
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource(); //CORS 정책을 설정하고 관리하는 데 사용 -> 특정 URL 패턴에 대한 CORS 구성을 등록
+        source.registerCorsConfiguration("/**", configuration); //모든 URL에 대해 CORS 구성을 적용
+        return source;
+    }
+
+    private TokenCheckFilter tokenCheckFilter(JWTUtil jwtUtil, APIUserDetailService apiUserDetailService){
+        return new TokenCheckFilter(apiUserDetailService, jwtUtil); //@RequiredArgsConstructor가 생성자를 만들기 때문
     }
 
 }
